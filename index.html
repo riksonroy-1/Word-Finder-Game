@@ -1,0 +1,366 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Word Guessing Game </title>
+
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <style>
+    :root{ --bg1:#667eea; --bg2:#764ba2; --card:#ffffff; --accent:#2563eb; --accent-2:#16a34a; }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: linear-gradient(135deg,var(--bg1),var(--bg2));
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      color:#0f172a;
+    }
+    .card{
+      width:100%;
+      max-width:900px;
+      background:var(--card);
+      border-radius:14px;
+      padding:22px;
+      box-shadow:0 12px 30px rgba(2,6,23,0.18);
+    }
+    h1{margin:0 0 8px;font-size:22px}
+    p.lead{margin:0 0 16px;color:#374151}
+    .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    input[type=number]{width:92px;padding:8px;border-radius:8px;border:1px solid #e6e9ef;text-align:center;font-weight:600}
+    button.btn{background:var(--accent);color:white;border:none;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}
+    button.btn.secondary{background:#e6eefc;color:var(--accent);font-weight:700}
+    button.btn.stop{background:#f3f4f6;color:#111}
+    .hidden{display:none}
+    .grid{margin-top:18px}
+    .row-line{display:flex;align-items:center;justify-content:space-between;border-radius:10px;padding:10px 12px;border:1px solid #eef2ff;background:linear-gradient(180deg,#fbfdff,#f8fbff);margin-bottom:10px}
+    .letters{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Courier New", monospace;color:#0f172a;letter-spacing:.08em}
+    .row-btn{background:var(--accent);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:700}
+    .row-btn:hover{transform:translateY(-2px)}
+    .result{margin-top:18px;text-align:center}
+    .word{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Courier New", monospace;font-size:24px;letter-spacing:.08em;color:#7c3aed}
+    .goodbye{padding:18px;text-align:center}
+    .small{font-size:13px;color:#475569}
+    .pop{animation:pop 260ms ease both}
+    @keyframes pop{from{transform:scale(.96);opacity:.6}to{transform:scale(1);opacity:1}}
+  </style>
+</head>
+<body>
+  <main class="card" role="main" aria-label="Word Guessing Game">
+    <h1>🔮 Word Guessing Game </h1>
+    <p class="lead">Think of a word (3–10 letters) and I will guess it. Select rows only.</p>
+
+    <section id="setup">
+      <div class="controls">
+        <input id="wordLength" type="number" min="3" max="10" placeholder="3 - 10" aria-label="Word length"/>
+        <button id="startBtn" class="btn">Start</button>
+        <button id="stopTop" class="btn stop">Stop Playing</button>
+        <span class="small">Tip: click anywhere once to enable sound (browser policy).</span>
+      </div>
+    </section>
+
+    <section id="gameArea" class="hidden" aria-live="polite">
+      <p id="prompt" style="margin-top:18px;font-weight:700"></p>
+      <div id="grid" class="grid" aria-hidden="false"></div>
+    </section>
+
+    <section id="result" class="hidden result">
+      <div style="font-weight:700;font-size:18px">✨ I found your word!</div>
+      <div id="wordGuess" class="word" aria-live="polite" style="margin-top:10px"></div>
+
+      <div style="margin-top:14px;display:flex;gap:10px;justify-content:center">
+        <button id="againBtn" class="btn" aria-label="Play again">Play Again</button>
+        <button id="stopBtn" class="btn stop" aria-label="Stop playing">Stop Playing</button>
+      </div>
+    </section>
+
+    <section id="goodbye" class="hidden goodbye">
+      <h2 style="margin:0 0 8px">👋 Thanks for playing!</h2>
+      <p class="small">Close the tab when ready.</p>
+      <div style="margin-top:12px">
+        <button id="restartBtn" class="btn secondary">Start New Game</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+
+  let L = 0;                    
+  let step = 0;                 
+  let sourceGrid = [];          
+  let firstRoundGrid = [];      
+  let secondRoundGrid = [];     
+  let audioCtx = null;
+
+  const setupEl = document.getElementById('setup');
+  const gameEl = document.getElementById('gameArea');
+  const gridEl = document.getElementById('grid');
+  const promptEl = document.getElementById('prompt');
+  const resultEl = document.getElementById('result');
+  const wordGuessEl = document.getElementById('wordGuess');
+  const goodbyeEl = document.getElementById('goodbye');
+
+  const startBtn = document.getElementById('startBtn');
+  const againBtn = document.getElementById('againBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const stopTop = document.getElementById('stopTop');
+  const restartBtn = document.getElementById('restartBtn');
+
+  function ordinal(n){
+    if(n%10===1 && n%100!==11) return n+"st";
+    if(n%10===2 && n%100!==12) return n+"nd";
+    if(n%10===3 && n%100!==13) return n+"rd";
+    return n+"th";
+  }
+
+  function buildSourceGrid(size){
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
+    const rows = [];
+    let i = 0;
+    while(i < alphabet.length){
+      const row = [];
+      for(let c = 0; c < size; c++){
+        row.push(i < alphabet.length ? alphabet[i++] : " ");
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  function clearGrid(){
+    gridEl.innerHTML = "";
+  }
+
+  function renderRows(matrix, onPick, title){
+    clearGrid();
+    promptEl.textContent = title;
+    matrix.forEach((row, idx) => {
+      const line = document.createElement('div');
+      line.className = 'row-line';
+      const letters = document.createElement('div');
+      letters.className = 'letters';
+      letters.textContent = row.join(' ');
+      const btn = document.createElement('button');
+      btn.className = 'row-btn';
+      btn.textContent = `Row ${idx+1}`;
+      btn.onclick = () => {
+        playClick();
+        onPick(idx+1);
+      };
+      line.appendChild(letters);
+      line.appendChild(btn);
+      gridEl.appendChild(line);
+    });
+    gameEl.classList.remove('hidden');
+    resultEl.classList.add('hidden');
+    goodbyeEl.classList.add('hidden');
+  }
+
+  function startGame(){
+    const v = parseInt(document.getElementById('wordLength').value);
+    if(Number.isNaN(v) || v < 3 || v > 10){
+      alert("Enter a number from 3 to 10.");
+      return;
+    }
+    L = v;
+    step = 0;
+    sourceGrid = buildSourceGrid(L);
+    firstRoundGrid = Array.from({length:L}, ()=>Array(L).fill(" "));
+    secondRoundGrid = Array.from({length:L}, ()=>Array(L).fill(" "));
+
+    setupEl.classList.add('hidden');
+    resultEl.classList.add('hidden');
+    goodbyeEl.classList.add('hidden');
+    gameEl.classList.remove('hidden');
+
+    renderRows(sourceGrid, pickRowRound1, `Round 1: Select the row containing your ${ordinal(step+1)} letter`);
+  }
+
+  function pickRowRound1(rowNum){
+    for(let i=0;i<L;i++){
+      firstRoundGrid[i][step] = (sourceGrid[rowNum-1][i] ?? " ");
+    }
+    step++;
+    if(step < L){
+      renderRows(sourceGrid, pickRowRound1, `Round 1: Select the row containing your ${ordinal(step+1)} letter`);
+    } else {
+      step = 0;
+      renderRows(firstRoundGrid, pickRowRound2, `Round 2: Select the row containing your ${ordinal(step+1)} letter`);
+    }
+  }
+
+  function pickRowRound2(rowNum){
+    for(let i=0;i<L;i++){
+      secondRoundGrid[i][step] = (firstRoundGrid[rowNum-1][i] ?? " ");
+    }
+    step++;
+    if(step < L){
+      renderRows(firstRoundGrid, pickRowRound2, `Round 2: Select the row containing your ${ordinal(step+1)} letter`);
+    } else {
+      revealResult();
+    }
+  }
+
+  function initAudio(){
+    if(audioCtx) return;
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AudioContext();
+  }
+
+  function playClick(){
+    try {
+      initAudio();
+      const t = audioCtx.currentTime;
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = "triangle";
+      o.frequency.setValueAtTime(720, t);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.16, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t);
+      o.stop(t + 0.13);
+    } catch(e){}
+  }
+
+  function playVictoryJingle(){
+    try {
+      initAudio();
+      const now = audioCtx.currentTime;
+      const notes = [523.25, 659.25, 783.99, 1046.5]; 
+      notes.forEach((freq, idx) => {
+        const start = now + idx * 0.125;
+        const dur = 0.18;
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(freq, start);
+        g.gain.setValueAtTime(0.0001, start);
+        g.gain.exponentialRampToValueAtTime(0.20, start + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start(start);
+        o.stop(start + dur + 0.02);
+      });
+    } catch(e){}
+  }
+
+  function playApplause(duration = 900){
+    try {
+      initAudio();
+      const ctx = audioCtx;
+      const end = ctx.currentTime + duration/1000;
+      for(let i=0;i<18;i++){
+        const burstTime = ctx.currentTime + (Math.random() * (duration/1000));
+        const bufferSize = 0.2 * ctx.sampleRate;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for(let j=0;j<bufferSize;j++){
+          data[j] = (Math.random()*2 - 1) * (Math.random()*0.9);
+        }
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        const band = ctx.createBiquadFilter();
+        band.type = 'bandpass';
+        band.frequency.value = 2200 + Math.random()*1200;
+        band.Q.value = 0.6 + Math.random()*1.2;
+
+        let panner = null;
+        if (ctx.createStereoPanner) {
+          panner = ctx.createStereoPanner();
+          panner.pan.value = (Math.random() * 2 - 1) * 0.8;
+        }
+
+        const gain = ctx.createGain();
+        const gstart = burstTime;
+        const gdur = 0.06 + Math.random()*0.14;
+        gain.gain.setValueAtTime(0.0001, gstart);
+        gain.gain.exponentialRampToValueAtTime(0.15 + Math.random()*0.2, gstart + 0.005);
+        gain.gain.exponentialRampToValueAtTime(0.0001, gstart + gdur + 0.005);
+
+        src.connect(band);
+        band.connect(gain);
+        if(panner){
+          gain.connect(panner);
+          panner.connect(ctx.destination);
+        } else {
+          gain.connect(ctx.destination);
+        }
+        src.start(burstTime);
+        src.stop(burstTime + gdur + 0.02);
+      }
+    } catch(e){}
+  }
+
+  function typeText(el, text, speed=80, cb){
+    el.textContent = "";
+    let i=0;
+    function tick(){
+      if(i < text.length){
+        el.textContent += text[i++];
+        setTimeout(tick, speed);
+      } else if(cb) {
+        cb();
+      }
+    }
+    tick();
+  }
+
+  function revealResult(){
+    const word = Array.from({length:L}, (_,i)=> secondRoundGrid[i][i] ?? " ").join("").replace(/\s+$/,'');
+    gameEl.classList.add('hidden');
+    resultEl.classList.remove('hidden');
+    wordGuessEl.classList.remove('pop');
+    playVictoryJingle();
+    setTimeout(()=> playApplause(1200), 220); 
+    try {
+      confetti({
+        particleCount: 180,
+        spread: 120,
+        scalar: 1.1,
+        origin: { y: 0.45 }
+      });
+    } catch(e){ /* confetti optional */ }
+
+    typeText(wordGuessEl, word, 90, ()=> {
+      wordGuessEl.classList.add('pop');
+    });
+  }
+
+  function resetToSetup(){
+    document.getElementById('wordLength').value = "";
+    setupEl.classList.remove('hidden');
+    gameEl.classList.add('hidden');
+    resultEl.classList.add('hidden');
+    goodbyeEl.classList.add('hidden');
+    wordGuessEl.textContent = "";
+  }
+
+  function stopPlaying(){
+    setupEl.classList.add('hidden');
+    gameEl.classList.add('hidden');
+    resultEl.classList.add('hidden');
+    goodbyeEl.classList.remove('hidden');
+  }
+
+  startBtn.addEventListener('click', startGame);
+  againBtn.addEventListener('click', () => { resetToSetup(); });
+  stopBtn.addEventListener('click', stopPlaying);
+  stopTop.addEventListener('click', stopPlaying);
+  restartBtn.addEventListener('click', () => { resetToSetup(); });
+
+  window.addEventListener('pointerdown', () => {
+    try { initAudio(); if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); } catch(e){}
+  }, { once:true });
+
+  window.startGame = startGame;
+  </script>
+</body>
+</html>
